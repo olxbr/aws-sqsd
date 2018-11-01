@@ -4,7 +4,6 @@ import java.net.URL
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
 import akka.Done
 import akka.actor.{Actor, ActorLogging, ActorSystem, PoisonPill, Props}
 import akka.http.scaladsl.Http
@@ -13,7 +12,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.alpakka.sqs.scaladsl.{SqsAckSink, SqsSource}
-import akka.stream.alpakka.sqs.{MessageAction, SqsSourceSettings}
+import akka.stream.alpakka.sqs.{MessageAction, MessageAttributeName, SqsSourceSettings}
 import akka.stream.scaladsl.{Balance, Broadcast, Flow, GraphDSL, Merge, Sink, Source, Zip}
 import akka.stream._
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
@@ -22,6 +21,8 @@ import com.amazonaws.services.sqs.model.Message
 import com.amazonaws.services.sqs.{AmazonSQSAsync, AmazonSQSAsyncClientBuilder}
 import common.SqsSettings
 import stream.StreamWrapperActor.{Healthcheck, Start}
+
+import scala.collection.JavaConverters._
 
 class StreamWrapperActor extends Actor with ActorLogging {
 
@@ -48,6 +49,7 @@ class StreamWrapperActor extends Actor with ActorLogging {
     .build()
 
   val sqsSourceSettings = SqsSourceSettings(
+    messageAttributeNames = Seq(MessageAttributeName("All")),
     waitTimeSeconds = SqsSettings.waitTimeSeconds,
     maxBufferSize = SqsSettings.workerConcurrency,
     maxBatchSize = 10
@@ -102,7 +104,7 @@ class StreamWrapperActor extends Actor with ActorLogging {
         case util.Success(response) if response.status == OK || response.status == Found =>
           response.discardEntityBytes()
           system.scheduler.scheduleOnce(SqsSettings.workerHealthWaitTime.seconds, self, Healthcheck)
-        case util.Success(response)  =>
+        case util.Success(response) =>
           response.discardEntityBytes()
           log.info("Application isn't ready. Restarting")
           sharedKillSwitch.abort(new RuntimeException("Application isn't ready. Restarting"))
@@ -131,10 +133,15 @@ class StreamWrapperActor extends Actor with ActorLogging {
           .map { msg =>
             val body = msg.getBody
 
+            val attrs = msg.getMessageAttributes.asScala
+              .toList
+              .filterNot(_._2.getDataType == "Binary")
+              .map { case (name, value) => RawHeader(s"X-Aws-Sqsd-Attr-$name", Option(value.getStringValue).getOrElse("")) }
+
             val headers = List(
               `User-Agent`("aws-sqsd/1.1"),
               RawHeader("X-Aws-Sqsd-Msgid", msg.getMessageId)
-            )
+            ) ++ attrs
 
             val httpRequest: (HttpRequest, String) = {
               val entity = HttpEntity(body).withContentType(contentType)
@@ -175,7 +182,7 @@ class StreamWrapperActor extends Actor with ActorLogging {
           val zip = builder.add(Zip[Message, MessageAction])
 
           balancer.out(i) ~> broadcast ~> zip.in0
-                             broadcast ~> flowHttp.mapAsync(1)(action => action) ~> zip.in1
+          broadcast ~> flowHttp.mapAsync(1)(action => action) ~> zip.in1
           zip.out ~> merge
         }
 
@@ -200,7 +207,11 @@ class StreamWrapperActor extends Actor with ActorLogging {
 
 object StreamWrapperActor {
   val name = "stream-wrapper-actor"
+
   def props: Props = Props[StreamWrapperActor]
+
   case object Start
+
   case object Healthcheck
+
 }
