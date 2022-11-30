@@ -45,7 +45,7 @@ docker build --tag <some_company>/aws-sqsd:<some version> .
 
 You should use the pre created GZVR's image
 ````
-docker -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e SQSD_QUEUE_URL=<queue-url> -it -d run vivareal/aws-sqsd
+docker -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e SQSD_QUEUE_URL=<queue-url> -it -d run ${{ secrets.CONTAINER_REGISTRY_HOST }}/aws-sqsd
 ````
 
 or the image created by yourself

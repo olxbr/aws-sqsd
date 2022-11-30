@@ -1,4 +1,4 @@
-FROM vivareal/base-images:alpine-3.5-java-8-jdk
+FROM 073521391622.dkr.ecr.us-east-1.amazonaws.com/base-images:alpine-3.5-java-8-jdk
 MAINTAINER Alexandre Silva (alexandre.silva@gzvr.com.br)
 
 COPY ./target/universal/aws-sqsd-0.1.tgz /usr/local/app/aws-sqsd-0.1.tgz
